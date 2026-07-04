@@ -9,28 +9,30 @@ import hashlib
 
 st.set_page_config(layout="wide")
 
-# 비밀번호 암호화 함수 (보안을 위해 텍스트를 복잡한 코드로 변환)
+# 비밀번호 암호화 함수
 def make_hashes(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
-st.title("📈 내 기타 성장 일기 (개인 로그인 버전)")
+st.title("📈 내 기타 성장 일기 (보안 강화 버전)")
 st.write("나만의 닉네임과 비밀번호로 안전하게 일기를 관리하세요!")
 
-# 1. 데이터 저장할 파일 준비 (이제 '아이디'와 '비밀번호 해시'도 함께 저장합니다!)
+# 데이터 파일 정의
 DATA_FILE = "practice_data.csv"
 columns_list = ["아이디", "비밀번호", "날짜", "연습 종류", "곡 명", "최고 BPM", "연습 분", "연습 초"]
 
-if os.path.exists(DATA_FILE):
-    try:
-        df = pd.read_csv(DATA_FILE)
-        if df.empty or len(df.columns) == 0:
-            df = pd.DataFrame(columns=columns_list)
-    except Exception:
-        df = pd.DataFrame(columns=columns_list)
-else:
-    df = pd.DataFrame(columns=columns_list)
+# 최신 파일 데이터를 안전하게 불러오는 함수
+def load_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            df_loaded = pd.read_csv(DATA_FILE)
+            if df_loaded.empty or len(df_loaded.columns) == 0:
+                return pd.DataFrame(columns=columns_list)
+            return df_loaded
+        except Exception:
+            return pd.DataFrame(columns=columns_list)
+    return pd.DataFrame(columns=columns_list)
 
-# 2. 세션 상태 관리 (로그인 상태 기억)
+# 세션 상태 관리 (로그인 및 기록 데이터 유지)
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user_id" not in st.session_state:
@@ -43,6 +45,9 @@ if "elapsed_min" not in st.session_state:
     st.session_state.elapsed_min = 0
 if "elapsed_sec" not in st.session_state:
     st.session_state.elapsed_sec = 0
+
+# 항상 파일에서 최신 데이터를 불러옵니다.
+df = load_data()
 
 # ==========================================
 # 🔑 사이드바: 로그인 / 회원가입 창 구현
@@ -58,27 +63,25 @@ if not st.session_state.logged_in:
         login_password = st.sidebar.text_input("비밀번호", type="password", key="login_pw")
         
         if st.sidebar.button("로그인하기", use_container_width=True):
-            hashed_pswd = make_hashes(login_password)
-            
-            # 기존 데이터 파일에서 아이디와 암호화된 비밀번호가 매칭되는지 확인
-            if not df.empty:
-                user_record = df[(df["아이디"] == login_user) & (df["비밀번호"] == hashed_pswd)]
+            if login_user and login_password:
+                hashed_pswd = make_hashes(login_password)
                 
-                # 가입된 기록이 있거나, 아직 전체 데이터는 없지만 첫 로그인이면 통과 가능하게 처리
-                if not user_record.empty or (login_user and login_password and login_user not in df["아이디"].values):
-                    st.session_state.logged_in = True
-                    st.session_state.user_id = login_user
-                    st.sidebar.success(f"👋 반갑습니다, {login_user}님!")
-                    st.rerun()
+                # 가입된 데이터가 있는지 확인
+                if not df.empty:
+                    # 정확히 아이디와 비밀번호가 일치하는 행 검색
+                    user_record = df[(df["아이디"] == login_user) & (df["비밀번호"] == hashed_pswd)]
+                    
+                    if not user_record.empty:
+                        st.session_state.logged_in = True
+                        st.session_state.user_id = login_user
+                        st.sidebar.success(f"👋 반갑습니다, {login_user}님!")
+                        st.rerun()
+                    else:
+                        st.sidebar.error("❌ 비밀번호가 틀렸거나 존재하지 않는 아이디입니다.")
                 else:
-                    st.sidebar.error("❌ 아이디 또는 비밀번호가 틀렸거나 없는 계정입니다. 회원가입을 먼저 해주세요.")
+                    st.sidebar.error("❌ 등록된 회원이 없습니다. 회원가입을 먼저 해주세요.")
             else:
-                # 파일이 완전히 비어있을 때는 첫 사용자 로그인 허용
-                if login_user and login_password:
-                    st.session_state.logged_in = True
-                    st.session_state.user_id = login_user
-                    st.sidebar.success(f"👋 첫 사용자로 로그인되었습니다: {login_user}님!")
-                    st.rerun()
+                st.sidebar.error("아이디와 비밀번호를 모두 입력해 주세요.")
                     
     elif choice == "회원가입":
         new_user = st.sidebar.text_input("사용할 닉네임(아이디)", key="reg_id")
@@ -90,7 +93,7 @@ if not st.session_state.logged_in:
             elif not df.empty and new_user in df["아이디"].values:
                 st.sidebar.error(" 이미 존재하는 닉네임입니다. 다른 이름을 사용해 주세요.")
             else:
-                # 회원 가입을 위한 더미(초기) 데이터 하나 생성하여 저장
+                # 안전하게 새로 가입 정보를 누적하여 파일 저장
                 hashed_new_password = make_hashes(new_password)
                 signup_data = pd.DataFrame({
                     "아이디": [new_user], "비밀번호": [hashed_new_password],
@@ -115,19 +118,16 @@ if not st.session_state.logged_in:
     st.warning("🔒 이 일기장은 비공개 개인 일기장입니다. 왼쪽 메뉴에서 로그인을 진행해 주세요.")
     st.info("💡 처음 오셨다면 '회원가입'을 먼저 눌러 나만의 닉네임과 비밀번호를 만드시면 됩니다!")
 else:
-    # 🚨 핵심 필터링: 전체 데이터 중에서 '현재 로그인한 내 아이디'의 기록만 쏙 빼오기!
+    # 🚨 로그인한 내 아이디 기록만 필터링
     my_df = df[df["아이디"] == st.session_state.user_id]
     
-    # 3. 사이드바 내부 목표 설정
     st.sidebar.write("---")
     st.sidebar.subheader("🎯 나의 주간 연습 목표")
     weekly_goal = st.sidebar.number_input("이번 주 목표 시간 (분)", min_value=10, max_value=2000, value=120, step=10)
     
-    # 4. 목표 달성률 프로그레스 바 (내 데이터로만 계산!)
     st.write("---")
     st.subheader(f"🔥 {st.session_state.user_id}님의 이번 주 목표 달성률")
     
-    # 가입 안내용 더미 데이터를 제외한 실제 연습 기록이 있는지 검사
     real_practice_df = my_df[my_df["연습 종류"] != "가입 안내"]
     
     if not real_practice_df.empty:
@@ -147,10 +147,10 @@ else:
             st.write(f"**현재 {recent_total:.1f}분** / 목표 {weekly_goal}분 (달성률: {progress_pct*100:.1f}%)")
             
             if progress_pct >= 1.0:
-                st.success("🎉 이번 주 목표 달성!! 훌륭한 기타리스트가 되어가고 있습니다!")
+                st.success("🎉 이번 주 목표 달성!!")
                 st.balloons()
         except Exception:
-            st.info("데이터 계산 중입니다. 첫 연습을 저장해 보세요!")
+            st.info("데이터 계산 중입니다.")
     else:
         st.info("아직 이번 주 기록이 없습니다. 타이머를 켜고 첫 경험치를 획득하세요!")
         
@@ -208,10 +208,14 @@ else:
             st.rerun()
             
     elif st.session_state.status == "stopped":
-        st.success(f"⏱️ 연습 완료! ({st.session_state.elapsed_min}분 {st.session_state.elapsed_sec}초) 정보가 자동 입력되었습니다.")
+        st.success(f"⏱️ 연습 완료! 정보가 자동 입력되었습니다.")
         if st.button("💾 최종 기록 저장하기", type="primary", use_container_width=True):
-            # 비밀번호 해시값 가져오기 (기존 기록 유지 목적)
-            current_pw_hash = df[df["아이디"] == st.session_state.user_id]["비밀번호"].values[0]
+            # 최신 전체 데이터 다시 로드 후 누적 저장
+            df_latest = load_data()
+            
+            # 내 계정의 가입 시 비밀번호 해시 찾기
+            user_rows = df_latest[df_latest["아이디"] == st.session_state.user_id]
+            current_pw_hash = user_rows["비밀번호"].values[0] if not user_rows.empty else ""
             
             new_data = pd.DataFrame({
                 "아이디": [st.session_state.user_id],
@@ -223,8 +227,10 @@ else:
                 "연습 분": [min_input],
                 "연습 초": [sec_input]
             })
-            df = pd.concat([df, new_data], ignore_index=True)
-            df.to_csv(DATA_FILE, index=False)
+            
+            df_combined = pd.concat([df_latest, new_data], ignore_index=True)
+            df_combined.to_csv(DATA_FILE, index=False)
+            
             st.session_state.status = "ready"
             st.session_state.elapsed_min = 0
             st.session_state.elapsed_sec = 0
@@ -249,7 +255,6 @@ else:
                 st.info("그래프를 구성 중입니다.")
                 
         st.write("### 📝 나의 전체 기록 표")
-        # 보여줄 때는 굳이 비밀번호 해시 열을 노출할 필요가 없으므로 지우고 보여줍니다.
         st.dataframe(real_practice_df.drop(columns=["비밀번호"]), use_container_width=True)
     else:
         st.info("아직 저장된 기타 연습 기록이 없습니다. 오늘 첫 연습을 시작해 보세요!")
